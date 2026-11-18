@@ -46,6 +46,14 @@ PROVIDER_KEYS = {
     "byteplus": ("ARK_API_KEY",),
     "fal": ("FAL_KEY",),
 }
+# Optional per-provider API base overrides.  These are deliberately environment-only: unlike
+# credentials, a base URL is safe to record in a job receipt, and this lets an OpenAI-compatible
+# gateway be used without putting a credential on a command line.  The normal vendor endpoints
+# remain the fallback when the variable is absent.
+PROVIDER_BASES = {
+    "openai": "OPENAI_API_BASE_URL",
+    "xai": "XAI_API_BASE_URL",
+}
 # Provider -> how to name its key to a person (route_media's "no ... configured" reasons).
 PROVIDERS = {name: " or ".join(names) for name, names in PROVIDER_KEYS.items()}
 KEY_VARIABLES = tuple(name for names in PROVIDER_KEYS.values() for name in names)
@@ -136,6 +144,19 @@ def key_variable(provider: str, config: dict | None = None) -> str | None:
 def api_key(provider: str, config: dict | None = None) -> str | None:
     """The provider's key, environment first, then the user config file; None when neither has one."""
     return _lookup(provider, config)[0]
+
+
+def api_base(provider: str, default: str, environ: dict | None = None) -> str:
+    """Return an environment-selected API base URL, or ``default``.
+
+    The override is intentionally not read from the project ``.env`` file.  Callers can source
+    that file explicitly (or use a process manager's environment) while keeping the existing
+    rule that project files are never silently treated as credential stores.  Validation of the
+    URL and the explicit ``--base-url`` consent path remain in ``generate_media.py``.
+    """
+    name = PROVIDER_BASES.get(provider)
+    value = _text((os.environ if environ is None else environ).get(name)) if name else None
+    return value.rstrip("/") if value else default
 
 
 def configured(config: dict | None = None) -> dict:

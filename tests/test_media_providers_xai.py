@@ -166,6 +166,26 @@ def test_an_interrupted_poll_resumes_without_paying_again(project, http, key, ca
     assert ledger_lines(project)[-1]["status"] == "done" and ledger_lines(project)[-1]["jobId"] == "req-resume"
 
 
+def test_custom_xai_gateway_relative_video_url_is_resolved_and_authenticated(project, http, key, capsys, monkeypatch):
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://gateway.example")
+    http.on("POST", "https://gateway.example/videos/generations", (200, {"request_id": "req-relative"}))
+    http.on("GET", "https://gateway.example/videos/req-relative",
+            (200, {"status": "done", "model": "grok-imagine-video-1.5", "progress": 100,
+                   "usage": {"cost_in_usd_ticks": 900000000},
+                   "video": {"url": "/videos/req-relative/content", "duration": 1,
+                             "respect_moderation": True}}), exact=True)
+    http.on("GET", "https://gateway.example/videos/req-relative/content", (200, mp4(audio=False)))
+    code, result, err = run_media(capsys, "video", "--provider", "xai", "--model", "grok-imagine-video-1.5",
+                                  "--prompt-file", "prompt.txt", "--reference", "master.png", "--duration", "1",
+                                  "--resolution", "480p", "--out-dir", "out/relative", "--project-dir", ".",
+                                  "--execute")
+    assert code == 0, err
+    assert result["status"] == "done" and result["costUsd"] == 0.09
+    download = http.calls("GET")[-1]
+    assert download.url == "https://gateway.example/videos/req-relative/content"
+    assert download.headers["authorization"] == "Bearer " + KEY
+
+
 @pytest.mark.parametrize("extra, message", [
     (["--resolution", "1080p", "--last-frame", "master.png"], "pins a last frame only at 480p or 720p"),
     (["--resolution", "1080p", "--keyframe", "master.png@2"], "keyframes only at 480p or 720p"),

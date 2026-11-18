@@ -387,7 +387,7 @@ class Adapter:
 
     @property
     def api_base(self):
-        return self.record["apiBase"]
+        return media_config.api_base(self.name, self.record["apiBase"])
 
     @property
     def kinds(self):
@@ -580,12 +580,17 @@ class OpenAIAdapter(Adapter):
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
             raise MediaError("Expected exactly one generated image", code="bad_response")
         encoded = items[0].get("b64_json")
-        if not isinstance(encoded, str):
-            raise MediaError("Expected base64 image response; no regeneration attempted", code="bad_response")
-        return MediaRef(data=_b64(encoded, "image"), returned_model=result.get("model"),
-                        usage=_int_usage(result.get("usage"), (("input_tokens", "input_tokens"),
-                                                                 ("output_tokens", "output_tokens"),
-                                                                 ("total_tokens", "total_tokens"))))
+        usage = _int_usage(result.get("usage"), (("input_tokens", "input_tokens"),
+                                               ("output_tokens", "output_tokens"),
+                                               ("total_tokens", "total_tokens")))
+        if isinstance(encoded, str):
+            return MediaRef(data=_b64(encoded, "image"), returned_model=result.get("model"), usage=usage)
+        # OpenAI-compatible gateways commonly return a short-lived HTTPS URL even when the
+        # official Images API returns b64_json.  It is downloaded immediately by the caller.
+        url = items[0].get("url")
+        if isinstance(url, str) and _https(url):
+            return MediaRef(url=url, returned_model=result.get("model"), usage=usage)
+        raise MediaError("Expected base64 image or HTTPS image URL", code="bad_response")
 
     def classify(self, status, fields):
         text = _text(fields)
@@ -845,10 +850,21 @@ class XAIAdapter(Adapter):
             if not isinstance(video, dict) or not isinstance(video.get("url"), str) or not video["url"]:
                 hint = "; with --upload-url, check that destination" if job.get("uploadUrl") else ""
                 raise MediaError("Completed video has no downloadable URL" + hint, code="bad_response")
+            video_url = video["url"]
+            relative_url = video_url.startswith("/")
+            if relative_url:
+                # A root-relative gateway content path requires the API credential. Resolve it
+                # using standard URL semantics, and refuse network-relative URLs before auth.
+                base = str(job.get("apiBase") or self.api_base)
+                if video_url.startswith("//") or "\\" in video_url:
+                    raise MediaError("Video download path must stay on the API host", code="bad_response")
+                video_url = parse.urljoin(base, video_url)
+                if not _https(video_url) or parse.urlsplit(video_url).netloc != parse.urlsplit(base).netloc:
+                    raise MediaError("Video download path must stay on the API host", code="bad_response")
             usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
             ticks = usage.get("cost_in_usd_ticks")
             cost = round(ticks / 1e10, 6) if isinstance(ticks, int) and not isinstance(ticks, bool) and ticks >= 0 else None
-            return "done", MediaRef(url=video["url"], returned_model=result.get("model"),
+            return "done", MediaRef(url=video_url, auth=relative_url, returned_model=result.get("model"),
                                     duration=video.get("duration"), cost_usd=cost)
         if state in ("failed", "expired"):
             error = result.get("error") if isinstance(result.get("error"), dict) else {}

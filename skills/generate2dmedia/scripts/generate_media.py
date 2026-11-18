@@ -411,7 +411,7 @@ def api_base(args):
     """The provider's default base URL, or an explicitly allowed https --base-url."""
     custom = getattr(args, "base_url", None)
     if not custom:
-        return API[args.provider]
+        return checked_base_url(media_providers.adapter(args.provider).api_base)
     if not getattr(args, "allow_custom_base_url", False):
         raise MediaError("--base-url sends the API key to another host; add --allow-custom-base-url to confirm", code="invalid_input", sent=False)
     return checked_base_url(custom)
@@ -1081,7 +1081,7 @@ def resume(args, transport=None):
     adapter = media_providers.adapter(provider)
     if not adapter.is_async(job["kind"], job.get("requestedModel")):
         raise MediaError(f"{adapter.label} answers {job['kind']} requests at once; there is no job to resume")
-    default = adapter.api_base
+    default = checked_base_url(adapter.api_base)
     base = default if version == 1 else checked_base_url(job.get("apiBase") or default)
     if base != default and not args.allow_custom_base_url:
         raise MediaError(f"This job uses a custom API base URL ({parse.urlsplit(base).hostname}); "

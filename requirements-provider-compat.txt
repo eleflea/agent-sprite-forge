@@ -1,0 +1,3 @@
+# Optional live-provider compatibility matrix and official SDK smoke tests.
+openai>=1.0
+imageio-ffmpeg>=0.8

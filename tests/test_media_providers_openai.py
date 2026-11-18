@@ -61,6 +61,18 @@ def test_generation_sends_the_documented_json(project, http, key, capsys):
     assert_no_secret(*surfaces(project, "out/hero", json.dumps(result), err))
 
 
+def test_openai_compatible_url_image_response_is_downloaded(project, http, key, capsys):
+    """Several compatible gateways return data[].url instead of b64_json."""
+    http.on("POST", API + "/images/generations",
+            (200, {"created": 1, "data": [{"url": "https://cdn.example/generated.png"}]}))
+    http.on("GET", "https://cdn.example/generated.png", (200, png((48, 48)), {"Content-Type": "image/png"}))
+    code, result, err = run_route(capsys, "image", "--prompt-file", "prompt.txt", "--out-dir", "out/url")
+    assert code == 0, err
+    assert Path(result["artifact"]).read_bytes() == png((48, 48))
+    assert [request.method for request in http.requests] == ["POST", "GET"]
+    assert "authorization" not in http.requests[-1].headers
+
+
 def test_reference_edit_is_multipart_with_every_reference_in_order(project, http, key, capsys):
     http.on("POST", API + "/images/edits", image_reply())
     code, result, err = run_route(capsys, "image", "--prompt-file", "prompt.txt", "--reference", "master.png",
